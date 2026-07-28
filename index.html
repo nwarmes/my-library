@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My library</title>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; max-width: 720px; margin: 0 auto; padding: 20px 16px 60px; color: #2b2b2b; background: #fff; }
+  #brief { border-bottom: 2px solid #8B3A3A; padding-bottom: 16px; margin-bottom: 24px; }
+  #brief h1 { margin: 0 0 4px; font-size: 20px; font-weight: 700; }
+  #brief p { color: #555; font-size: 14px; line-height: 1.6; margin: 0; }
+  #search { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-family: inherit; font-size: 15px; margin-bottom: 20px; }
+  h2.genre { font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; color: #8B3A3A; border-bottom: 1px solid #eee; padding-bottom: 6px; margin: 22px 0 8px; }
+  .entry { padding: 8px 0; border-bottom: 1px solid #f2f2f2; }
+  .entry .head { font-size: 15px; }
+  .entry .head .t { font-style: italic; }
+  .entry .head .a { color: #777; }
+  .entry .desc { font-size: 12px; color: #888; margin-top: 2px; }
+  #status { color: #999; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div id="brief">
+  <h1>My library</h1>
+  <p id="brief-text">Loading...</p>
+</div>
+
+<input id="search" type="text" placeholder="Search title or author...">
+
+<div id="status"></div>
+<div id="genres"></div>
+
+<script>
+  // Paste your Google Sheet "Publish to web" CSV link below
+  const SHEET_CSV_URL = "PASTE_YOUR_PUBLISHED_CSV_URL_HERE";
+
+  let books = [];
+
+  function parseCSV(text) {
+    const rows = [];
+    let row = [], field = '', inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i], next = text[i + 1];
+      if (inQuotes) {
+        if (c === '"' && next === '"') { field += '"'; i++; }
+        else if (c === '"') { inQuotes = false; }
+        else { field += c; }
+      } else {
+        if (c === '"') { inQuotes = true; }
+        else if (c === ',') { row.push(field); field = ''; }
+        else if (c === '\n' || c === '\r') {
+          if (field.length || row.length) { row.push(field); rows.push(row); row = []; field = ''; }
+        } else { field += c; }
+      }
+    }
+    if (field.length || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  function toBooks(rows) {
+    if (!rows.length) return [];
+    const headers = rows[0].map(h => h.trim().toLowerCase());
+    return rows.slice(1).filter(r => r.length > 1 || r[0]).map(r => {
+      const obj = {};
+      headers.forEach((h, i) => obj[h] = (r[i] || '').trim());
+      return {
+        title: obj.title || 'Untitled',
+        author: obj.author || 'Unknown',
+        genre: obj.genre || 'Uncategorized',
+        desc: obj.description || obj.desc || ''
+      };
+    });
+  }
+
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function render() {
+    const q = document.getElementById('search').value.trim().toLowerCase();
+    const filtered = books.filter(b =>
+      b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q)
+    );
+
+    const genreCount = new Set(books.map(b => b.genre)).size;
+    document.getElementById('brief-text').textContent =
+      books.length + ' books across ' + genreCount + ' genres. Organized by genre, then author.';
+
+    const byGenre = {};
+    filtered.forEach(b => {
+      if (!byGenre[b.genre]) byGenre[b.genre] = [];
+      byGenre[b.genre].push(b);
+    });
+
+    const genresEl = document.getElementById('genres');
+    genresEl.innerHTML = '';
+
+    Object.keys(byGenre).sort().forEach(genre => {
+      const section = document.createElement('div');
+      const heading = document.createElement('h2');
+      heading.className = 'genre';
+      heading.textContent = genre;
+      section.appendChild(heading);
+
+      byGenre[genre].sort((a, b) => a.author.localeCompare(b.author)).forEach(b => {
+        const row = document.createElement('div');
+        row.className = 'entry';
+        row.innerHTML =
+          '<div class="head"><span class="t">' + escapeHtml(b.title) + '</span>' +
+          '<span class="a"> — ' + escapeHtml(b.author) + '</span></div>' +
+          (b.desc ? '<div class="desc">' + escapeHtml(b.desc) + '</div>' : '');
+        section.appendChild(row);
+      });
+
+      genresEl.appendChild(section);
+    });
+  }
+
+  document.getElementById('search').addEventListener('input', render);
+
+  async function load() {
+    const statusEl = document.getElementById('status');
+    if (SHEET_CSV_URL.indexOf('PASTE_YOUR') === 0) {
+      statusEl.textContent = 'Paste your published Google Sheet CSV URL into SHEET_CSV_URL near the top of this file.';
+      document.getElementById('brief-text').textContent = 'Not connected yet.';
+      return;
+    }
+    try {
+      statusEl.textContent = 'Loading your library...';
+      const res = await fetch(SHEET_CSV_URL);
+      const text = await res.text();
+      books = toBooks(parseCSV(text));
+      statusEl.textContent = '';
+      render();
+    } catch (e) {
+      statusEl.textContent = 'Could not load the sheet. Check the published CSV URL and your connection.';
+    }
+  }
+
+  load();
+</script>
+
+</body>
+</html>
